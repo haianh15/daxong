@@ -1305,6 +1305,60 @@ export const INITIAL_PERIOD_BILLS: PeriodBill[] = [
     isConfirmed: true,
     confirmedAt: '2026-10-05T11:00:00Z',
     version: 1
+  },
+  {
+    id: 'bill_102_k10',
+    roomCode: 'P.102',
+    leaseId: 'THUE-102-L1',
+    periodCode: 'Kỳ 10/2026',
+    servicePeriodFrom: '2026-10-01',
+    servicePeriodTo: '2026-10-15',
+    nextRentPeriodFrom: '2026-10-16',
+    nextRentPeriodTo: '2026-10-31',
+    isRentPeriodEnded: true,
+    nextMonthRentAmount: 0,
+    electricityUsage: 45,
+    electricityRate: 3500,
+    electricityAmount: 157500,
+    waterUsage: 2,
+    waterRate: 30000,
+    waterAmount: 60000,
+    serviceFees: [
+      { name: 'Vệ sinh rác thải', amount: 50000 },
+      { name: 'Internet cáp quang Wifi', amount: 100000 },
+      { name: 'Chiếu sáng thang máy', amount: 50000 }
+    ],
+    totalAmount: 417500,
+    isConfirmed: true,
+    confirmedAt: '2026-10-15T15:30:00Z',
+    version: 1
+  },
+  {
+    id: 'bill_202_k10',
+    roomCode: 'P.202',
+    leaseId: 'THUE-202-L1',
+    periodCode: 'Kỳ 10/2026',
+    servicePeriodFrom: '2026-10-01',
+    servicePeriodTo: '2026-10-15',
+    nextRentPeriodFrom: '2026-10-16',
+    nextRentPeriodTo: '2026-10-31',
+    isRentPeriodEnded: true,
+    nextMonthRentAmount: 0,
+    electricityUsage: 50,
+    electricityRate: 3500,
+    electricityAmount: 175000,
+    waterUsage: 2.5,
+    waterRate: 30000,
+    waterAmount: 75000,
+    serviceFees: [
+      { name: 'Vệ sinh rác thải', amount: 50000 },
+      { name: 'Internet cáp quang Wifi', amount: 100000 },
+      { name: 'Chiếu sáng thang máy', amount: 50000 }
+    ],
+    totalAmount: 450000,
+    isConfirmed: true,
+    confirmedAt: '2026-10-15T16:00:00Z',
+    version: 1
   }
 ];
 
@@ -1544,6 +1598,50 @@ export const INITIAL_RETURN_INSPECTIONS: ReturnInspection[] = [
       quantity: ast.standardQuantity,
       condition: 'Bình thường'
     }))
+  },
+  {
+    id: 'ret_102',
+    roomCode: 'P.102',
+    leaseId: 'THUE-102-L1',
+    contractId: 'HD-102-GIAHAN',
+    inspectionDate: '2026-10-15',
+    step304Status: 'Đã nhận lại',
+    step305Confirmed: true, // Đã nhận lại phòng thực tế theo ASIS-02/3.05
+    step305ConfirmedAt: '2026-10-15T15:30:00Z',
+    step305ConfirmedBy: 'Nguyễn Văn An',
+    step305Evidence: 'Khách Lê Thị Cúc đã bàn giao đủ 2 chìa khóa + thẻ từ, ký xác nhận trả phòng 15/10/2026',
+    finalElectricityKwh: 1850,
+    finalWaterM3: 65,
+    assetsCheckedFully: true,
+    version: 1,
+    items: INITIAL_STANDARD_ASSETS.map((ast) => ({
+      name: ast.name,
+      inspected: true,
+      quantity: ast.standardQuantity,
+      condition: 'Bình thường'
+    }))
+  },
+  {
+    id: 'ret_203',
+    roomCode: 'P.203',
+    leaseId: 'THUE-203-L1',
+    contractId: 'HD-203-2026',
+    inspectionDate: '2026-10-16',
+    step304Status: 'Đã nhận lại',
+    step305Confirmed: true, // Đã nhận lại thực tế
+    step305ConfirmedAt: '2026-10-16T10:00:00Z',
+    step305ConfirmedBy: 'Nguyễn Văn An',
+    step305Evidence: 'Khách Võ Thị Hồng trả phòng trước hạn, bàn giao chìa khóa ngày 16/10/2026',
+    finalElectricityKwh: 2210,
+    finalWaterM3: 78,
+    assetsCheckedFully: true,
+    version: 1,
+    items: INITIAL_STANDARD_ASSETS.map((ast) => ({
+      name: ast.name,
+      inspected: true,
+      quantity: ast.standardQuantity,
+      condition: 'Bình thường'
+    }))
   }
 ];
 
@@ -1552,33 +1650,146 @@ export const INITIAL_SETTLEMENT_SLIPS: DepositSettlementSlip[] = [
     id: 'QTC-202-2026',
     roomCode: 'P.202',
     leaseId: 'THUE-202-L1',
+    contractChain: ['HD-202-2026'],
+    initialContractId: 'HD-202-2026',
     initialDepositAmount: 3800000,
     initialDepositCode: 'COC-202-L1',
     handoverReturnDate: '2026-10-15',
+    actualReturnDate: '2026-10-15',
+    bg07Ref: 'BG07-202-2026',
+    bg07Linked: true,
+    finalBillId: 'bill_202_k10',
+    finalBillPeriod: 'Kỳ 10/2026',
+    finalBillConfirmed: true,
+    prepaidRentAmount: 3800000,
     deductions: [
       {
         id: 'ded_1',
         category: 'Điện nước dịch vụ kỳ cuối',
         description: 'Điện nước và phí dịch vụ kỳ cuối đến ngày nhận lại 15/10/2026',
-        amount: 450000
+        amount: 450000,
+        reason: 'Theo bảng tính kỳ cuối TT-03 đã xác nhận'
       }
     ],
     calculatedResult: 3350000, // 3.800.000 - 450.000 = 3.350.000đ (Hoàn cọc)
+    calculationStatus: 'Đã tính',
     status: 'Khách đồng ý', // Đang ở bước sẵn sàng hoàn cọc qua UC-QTC-03
+    version: 1,
     reviewRequired: false,
     tenantFeedback: 'Đồng ý',
+    tenantAgreementEvidence: {
+      schemeVersion: 1,
+      agreedAmount: 3350000,
+      evidenceFile: 'zalo_xac_nhan_le_van_dat.jpg',
+      evidenceNote: 'Khách Lê Văn Đạt xác nhận qua Zalo: đồng ý phương án nhận lại 3.350.000đ vào tài khoản Vietcombank 1012345678',
+      agreedAt: '2026-10-15T17:00:00Z',
+      agreedBy: 'Nguyễn Văn An (Chủ nhà)'
+    },
     contactLogs: [
       {
-        contactTime: '2026-10-15T17:00:00',
+        id: 'cl_202_1',
+        contactTime: '2026-10-15 17:00',
         channel: 'Zalo',
         contactPerson: 'Khách thuê Lê Văn Đạt',
-        result: 'Khách đồng ý phương án hoàn 3.350.000đ sau khi trừ 450.000đ tiền điện nước dịch vụ',
-        evidence: 'Ảnh chụp màn hình tin nhắn Zalo khách xác nhận tài khoản nhận'
+        content: 'Thông báo phương án quyết toán cọc v1: Cọc gốc 3.800.000đ trừ 450.000đ điện nước dịch vụ kỳ cuối, hoàn trả 3.350.000đ.',
+        result: 'Đồng ý',
+        evidence: 'Ảnh chụp màn hình tin nhắn Zalo khách xác nhận số tài khoản nhận hoàn cọc',
+        schemeVersion: 1,
+        loggedBy: 'Nguyễn Văn An'
       }
     ],
     step58Published: false,
+    auditHistory: [
+      {
+        timestamp: '2026-10-15 16:30',
+        user: 'Nguyễn Văn An',
+        action: 'Lập phiếu quyết toán cọc (UC-QTC-01)',
+        schemeVersion: 1,
+        note: 'Khởi tạo phương án cọc gốc 3.800.000đ, trừ tiền kỳ cuối 450.000đ'
+      },
+      {
+        timestamp: '2026-10-15 17:10',
+        user: 'Nguyễn Văn An',
+        action: 'Ghi nhận khách đồng ý (UC-QTC-02)',
+        schemeVersion: 1,
+        note: 'Khách xác nhận đồng ý nhận hoàn cọc 3.350.000đ qua Vietcombank'
+      }
+    ],
     createdAt: '2026-10-15T16:30:00Z',
     updatedAt: '2026-10-15T17:10:00Z'
+  },
+  {
+    id: 'QTC-302-2026',
+    roomCode: 'P.302',
+    leaseId: 'THUE-302-L1',
+    contractChain: ['HD-302-2026'],
+    initialContractId: 'HD-302-2026',
+    initialDepositAmount: 3800000,
+    initialDepositCode: 'COC-302-L1',
+    handoverReturnDate: '2026-10-14',
+    actualReturnDate: '2026-10-14',
+    finalBillId: 'bill_302_k10',
+    finalBillPeriod: 'Kỳ 10/2026',
+    finalBillConfirmed: true,
+    prepaidRentAmount: 3800000,
+    deductions: [
+      {
+        id: 'ded_302_1',
+        category: 'Công nợ kỳ trước',
+        description: 'Tiền nhà nợ kỳ 09/2026 quá hạn (UC08.1/CN-01)',
+        amount: 4150000,
+        reason: 'Thông báo nợ TB-302-2026-09 chưa thanh toán'
+      },
+      {
+        id: 'ded_302_2',
+        category: 'Thiệt hại tài sản',
+        description: 'Bồi thường hư hỏng cửa kính ban công theo BG07',
+        amount: 800000,
+        reason: 'Cửa kính bị nứt vỡ theo biên bản BG07'
+      }
+    ],
+    calculatedResult: -1150000, // 3.800.000 - 4.950.000 = -1.150.000đ (Thu thêm)
+    calculationStatus: 'Đã tính',
+    status: 'Tranh chấp', // Đang tranh chấp (để kiểm thử AF-03 mở lại phiếu tranh chấp)
+    version: 1,
+    reviewRequired: false,
+    tenantFeedback: 'Không đồng ý',
+    disputeReason: 'Khách không đồng ý bồi thường 800.000đ cửa kính, cho rằng do giông bão hao mòn',
+    disputeItems: 'Khoản khấu trừ thiệt hại tài sản 800.000đ',
+    disputeBasis: 'Ảnh chụp hiện trạng BG07 và hợp đồng thuê điều 5',
+    disputeLocked: true,
+    contactLogs: [
+      {
+        id: 'cl_302_1',
+        contactTime: '2026-10-14 18:00',
+        channel: 'Điện thoại',
+        contactPerson: 'Hoàng Minh Tuấn',
+        content: 'Thông báo phương án quyết toán thu thêm 1.150.000đ do nợ kỳ 09 và đền cửa kính',
+        result: 'Không đồng ý',
+        evidence: 'Ghi âm cuộc gọi khách phản đối khoản đền cửa kính',
+        schemeVersion: 1,
+        loggedBy: 'Nguyễn Văn An'
+      }
+    ],
+    step58Published: false,
+    auditHistory: [
+      {
+        timestamp: '2026-10-14 17:00',
+        user: 'Nguyễn Văn An',
+        action: 'Lập phiếu quyết toán cọc (UC-QTC-01)',
+        schemeVersion: 1,
+        note: 'Phương án ban đầu: Cọc 3.8tr trừ nợ 4.15tr và đền kính 800k'
+      },
+      {
+        timestamp: '2026-10-14 18:30',
+        user: 'Nguyễn Văn An',
+        action: 'Xác lập tranh chấp (UC-QTC-02 / AF-01)',
+        schemeVersion: 1,
+        note: 'Hai bên chưa thống nhất về chi phí bồi thường cửa kính 800.000đ'
+      }
+    ],
+    createdAt: '2026-10-14T17:00:00Z',
+    updatedAt: '2026-10-14T18:30:00Z'
   }
 ];
 

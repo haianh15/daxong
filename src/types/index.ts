@@ -701,30 +701,65 @@ export interface DeductionItem {
   description: string;
   amount: number;
   evidence?: string;
-  clauseRef?: string; // Điều khoản hợp đồng
+  clauseRef?: string; // Điều khoản hợp đồng (bắt buộc cho AF-05)
+  reason?: string; // Lý do khấu trừ
+  originalAmount?: number; // Số tiền gốc trước điều chỉnh
+  adjustmentProposal?: 'giảm' | 'bỏ' | 'giữ nguyên';
+  adjustmentReason?: string;
+}
+
+export interface SettlementContactLog {
+  id: string;
+  contactTime: string;
+  channel: 'Điện thoại' | 'Zalo' | 'Trực tiếp' | 'Khác' | string;
+  contactPerson: string;
+  content: string;
+  result: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được';
+  evidence?: string;
+  schemeVersion: number;
+  loggedBy: string;
 }
 
 export interface DepositSettlementSlip {
-  id: string; // Mã phiếu quyết toán
+  id: string; // Mã phiếu quyết toán, vd: QTC-202-2026
   roomCode: string;
   leaseId: string;
-  initialDepositAmount: number; // Cọc gốc
-  initialDepositCode: string;
-  handoverReturnDate: string;
+  contractChain: string[]; // Chuỗi các hợp đồng thuê liên tục (AF-01)
+  initialContractId: string; // Hợp đồng đầu tiên trong chuỗi thuê
+  initialDepositAmount: number; // Cọc gốc lấy từ hợp đồng đầu tiên / PH-07
+  initialDepositCode: string; // Mã cọc gốc từ PH-07
+  handoverReturnDate: string; // Ngày nhận lại phòng thực tế (3.05)
+  actualReturnDate?: string;
+  bg07Ref?: string; // Mã đối chiếu tài sản BG07
+  bg07Linked?: boolean; // Cờ Đã liên kết với BG07 hồ sơ 3.18
+  finalBillId?: string; // Bảng tính kỳ cuối TT-03
+  finalBillPeriod?: string;
+  finalBillConfirmed: boolean; // Bảng tính kỳ cuối TT-03 đã xác nhận? (AF-02)
+  prepaidRentAmount?: number; // Tiền thuê đã trả trước để đối chiếu (không hoàn ngày chưa ở - BR-QTC01-04)
   deductions: DeductionItem[];
   calculatedResult: number; // Cọc gốc - Tổng khấu trừ (>0 hoàn cọc; <0 thu thêm; =0 đối trừ hết)
+  calculationStatus: 'Đã tính' | 'Chưa đủ căn cứ'; // AF-02: chưa xác nhận TT-03 thì giữ Đang lập, Chưa đủ căn cứ
   status: DepositSettlementStatus;
-  reviewRequired: boolean; // Cần rà soát khi kỳ cuối đổi
+  version: number; // Phiên bản phương án v1, v2...
+  reviewRequired: boolean; // Cờ Cần rà soát khi kỳ cuối đổi (BR-QTC01-08)
+  reviewReason?: string;
   tenantFeedback?: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được';
   disputeReason?: string;
-  contactLogs: {
-    contactTime: string;
-    channel: string;
-    contactPerson: string;
-    result: string;
-    evidence?: string;
-  }[];
-  // Chứng từ chuyển khoản duy nhất khi có tiền phải hoàn/thu thêm
+  disputeItems?: string;
+  disputeBasis?: string;
+  disputeLocked?: boolean;
+  cancelReason?: string;
+  cancelledAt?: string;
+  contactLogs: SettlementContactLog[];
+  tenantAgreementEvidence?: {
+    schemeVersion: number;
+    agreedAmount: number;
+    evidenceFile: string;
+    evidenceNote: string;
+    agreedAt: string;
+    agreedBy: string;
+  };
+  // Chứng từ chuyển khoản duy nhất khi có tiền phải hoàn/thu thêm (BR-QTC03-08, BR-QTC03-10)
   transferReceipt?: {
     receiptType: 'Hoàn cọc' | 'Thu thêm';
     amount: number;
@@ -733,10 +768,20 @@ export interface DepositSettlementSlip {
     accountHolder: string;
     transferDate: string;
     transactionCode: string;
+    evidenceFile?: string;
     verifiedBy: string;
+    confirmedAt: string;
   };
   step58Published: boolean;
   step58PublishedAt?: string;
+  step58ResultCode?: string; // Mã kết quả 5.8 cấp cho BG10
+  auditHistory: {
+    timestamp: string;
+    user: string;
+    action: string;
+    note?: string;
+    schemeVersion?: number;
+  }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -854,8 +899,8 @@ export interface PaymentNotice {
   dueDate: string; // Hạn thanh toán (>= ngày phát hành khi tạo mới, giữ nguyên khi thay thế)
   originalDueDate: string; // Giữ nguyên hạn gốc khi thay thế
   totalAmount: number;
-  status: 'Đang hiệu lực' | 'Đã thay thế';
-  paymentStatus: 'Chưa thu' | 'Đã thu';
+  status: 'Đang hiệu lực' | 'Đã thay thế' | 'Đã thanh toán';
+  paymentStatus: 'Chưa thu' | 'Đã thu' | 'Đã xử lý bằng cọc';
   // Chi tiết 2 nhóm theo BR-UC07.1-02 và BR-UC07.2-02
   breakdown?: {
     nextRentAmount: number;

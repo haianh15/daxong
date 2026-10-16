@@ -25,6 +25,8 @@ import {
   TenantHistoryEntry,
   Contract,
   DepositSettlementSlip,
+  DeductionItem,
+  SettlementContactLog,
   MeterReading,
   PeriodBill,
   PaymentNotice,
@@ -277,9 +279,46 @@ interface AppContextType {
 
   // Deposit Settlement (QT05)
   settlementSlips: DepositSettlementSlip[];
-  saveSettlementSlipQTC01: (slip: DepositSettlementSlip) => void;
-  updateSettlementFeedbackQTC02: (slipId: string, feedback: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được', reason?: string, deductionUpdates?: { id: string; amount: number }[]) => void;
-  confirmSettlementTransferReceiptQTC03: (slipId: string, receipt: DepositSettlementSlip['transferReceipt']) => { success: boolean; message: string };
+  saveSettlementSlipQTC01: (slip: DepositSettlementSlip) => { success: boolean; message: string };
+  updateSettlementFeedbackQTC02: (params: {
+    slipId: string;
+    feedback: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được';
+    contactLog: {
+      channel: string;
+      contactPerson: string;
+      content: string;
+      result: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được';
+      evidence?: string;
+    };
+    agreementEvidence?: {
+      evidenceFile: string;
+      evidenceNote: string;
+    };
+    disputeReason?: string;
+  }) => { success: boolean; message: string };
+  adjustSettlementDeductionsQTC02: (params: {
+    slipId: string;
+    updatedDeductions: DeductionItem[];
+    adjustReason: string;
+  }) => { success: boolean; message: string; newVersion: number };
+  lockDisputeSettlementQTC02: (params: {
+    slipId: string;
+    disputeReason: string;
+    disputeItems: string;
+    disputeBasis: string;
+  }) => { success: boolean; message: string };
+  reopenDisputedSettlementQTC02: (params: {
+    slipId: string;
+    reopenReason: string;
+  }) => { success: boolean; message: string };
+  cancelSettlementSlipQTC02: (params: {
+    slipId: string;
+    cancelReason: string;
+  }) => { success: boolean; message: string };
+  confirmSettlementTransferReceiptQTC03: (params: {
+    slipId: string;
+    receipt?: DepositSettlementSlip['transferReceipt'];
+  }) => { success: boolean; message: string };
 
   // Billing (QT06)
   meterReadings: MeterReading[];
@@ -3067,76 +3106,498 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
-  // ==================== DEPOSIT SETTLEMENT (QT05) ====================
+  // ==================== DEPOSIT SETTLEMENT (QT05: UC-QTC-01 -> UC-QTC-03) ====================
   const saveSettlementSlipQTC01 = (slip: DepositSettlementSlip) => {
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+
+    const slipWithAudit: DepositSettlementSlip = {
+      ...slip,
+      status: slip.status || 'Đang lập',
+      auditHistory: [
+        ...(slip.auditHistory || []),
+        {
+          timestamp: nowStr,
+          user: userName,
+          action: 'Lập / Cập nhật phiếu quyết toán cọc (UC-QTC-01)',
+          schemeVersion: slip.version || 1,
+          note: `Khởi tạo phương án cọc gốc ${slip.initialDepositAmount.toLocaleString('vi-VN')} đ, kết quả dự kiến: ${slip.calculatedResult.toLocaleString('vi-VN')} đ`
+        }
+      ],
+      updatedAt: nowStr
+    };
+
     setSettlementSlips(prev => {
       const idx = prev.findIndex(s => s.id === slip.id);
       if (idx >= 0) {
         const u = [...prev];
-        u[idx] = slip;
+        u[idx] = slipWithAudit;
         return u;
       }
-      return [slip, ...prev];
+      return [slipWithAudit, ...prev];
     });
-  };
 
-  const updateSettlementFeedbackQTC02 = (
-    slipId: string,
-    feedback: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được',
-    reason?: string,
-    deductionUpdates?: { id: string; amount: number }[]
-  ) => {
-    setSettlementSlips(prev => prev.map(s => {
-      if (s.id !== slipId) return s;
-
-      let deductions = s.deductions;
-      if (deductionUpdates) {
-        deductions = deductions.map(d => {
-          const upd = deductionUpdates.find(u => u.id === d.id);
-          return upd ? { ...d, amount: upd.amount } : d;
-        });
-      }
-
-      const totalDed = deductions.reduce((sum, d) => sum + d.amount, 0);
-      const calculated = s.initialDepositAmount - totalDed;
-
-      let newStatus: DepositSettlementSlip['status'] = s.status;
-      if (feedback === 'Đồng ý') newStatus = 'Khách đồng ý';
-      else if (feedback === 'Không đồng ý') newStatus = 'Không đồng ý';
-      else if (feedback === 'Không liên hệ được') newStatus = 'Không liên hệ được';
-
-      return {
-        ...s,
-        tenantFeedback: feedback,
-        disputeReason: reason || s.disputeReason,
-        deductions,
-        calculatedResult: calculated,
-        status: newStatus,
-        updatedAt: new Date().toISOString()
-      };
-    }));
-  };
-
-  const confirmSettlementTransferReceiptQTC03 = (
-    slipId: string,
-    receipt: DepositSettlementSlip['transferReceipt']
-  ) => {
-    const slip = settlementSlips.find(s => s.id === slipId);
-    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.' };
-    if (slip.status !== 'Khách đồng ý') {
-      return { success: false, message: 'Chỉ ghi nhận kết quả khi khách đã đồng ý phương án quyết toán.' };
+    // If BG07 reference exists, mark asset comparison as linked to 3.18
+    if (slip.bg07Ref) {
+      setAssetComparisonResults(prev => prev.map(r => {
+        if (r.id === slip.bg07Ref || (r.roomCode === slip.roomCode && r.leaseId === slip.leaseId)) {
+          return {
+            ...r,
+            transferredToSettlement318: true,
+            transferredAt: nowStr,
+            settlementCaseId: slip.id
+          };
+        }
+        return r;
+      }));
     }
 
-    setSettlementSlips(prev => prev.map(s => s.id === slipId ? {
-      ...s,
-      transferReceipt: receipt,
-      status: 'Đã có 5.8 – chờ ký biên bản',
-      step58Published: true,
-      step58PublishedAt: new Date().toISOString()
-    } : s));
+    logSecurity('SETTLEMENT_SAVED_QTC01', `Settlement slip ${slip.id} saved for room ${slip.roomCode} in status 'Đang lập'`);
+    return {
+      success: true,
+      message: `Lưu phiếu quyết toán cọc ${slip.id} thành công ở trạng thái Đang lập (UC-QTC-01)!`
+    };
+  };
 
-    logSecurity('SETTLEMENT_CONFIRMED_QTC03', `Settlement ${slipId} confirmed. Published 5.8.`);
-    return { success: true, message: 'Ghi nhận kết quả quyết toán cọc thành công! Đã phát hành kết quả 5.8.' };
+  const updateSettlementFeedbackQTC02 = (params: {
+    slipId: string;
+    feedback: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được';
+    contactLog: {
+      channel: string;
+      contactPerson: string;
+      content: string;
+      result: 'Đồng ý' | 'Không đồng ý' | 'Chưa phản hồi' | 'Không liên hệ được';
+      evidence?: string;
+    };
+    agreementEvidence?: {
+      evidenceFile: string;
+      evidenceNote: string;
+    };
+    disputeReason?: string;
+  }) => {
+    const slip = settlementSlips.find(s => s.id === params.slipId);
+    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.' };
+
+    if (slip.status === 'Đã có 5.8 – chờ ký biên bản' || slip.status === 'Hoàn tất' || slip.status === 'Đã hủy') {
+      return { success: false, message: 'Phiếu đã có kết quả 5.8 hoặc đã khóa, chỉ được xem (BR-UC.QTC.02-08).' };
+    }
+
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+
+    const newContactLog: SettlementContactLog = {
+      id: 'cl_' + Date.now().toString().slice(-6),
+      contactTime: nowStr.replace('T', ' ').slice(0, 16),
+      channel: params.contactLog.channel,
+      contactPerson: params.contactLog.contactPerson,
+      content: params.contactLog.content,
+      result: params.contactLog.result,
+      evidence: params.contactLog.evidence,
+      schemeVersion: slip.version,
+      loggedBy: userName
+    };
+
+    let newStatus: DepositSettlementSlip['status'] = slip.status;
+    let newAgreementEvidence = slip.tenantAgreementEvidence;
+
+    if (params.feedback === 'Đồng ý') {
+      if (!params.agreementEvidence?.evidenceFile) {
+        return { success: false, message: 'Bắt buộc đính kèm bằng chứng khách đồng ý hợp lệ đúng phiên bản (EF-03).' };
+      }
+      newStatus = 'Khách đồng ý';
+      newAgreementEvidence = {
+        schemeVersion: slip.version,
+        agreedAmount: slip.calculatedResult,
+        evidenceFile: params.agreementEvidence.evidenceFile,
+        evidenceNote: params.agreementEvidence.evidenceNote,
+        agreedAt: nowStr,
+        agreedBy: userName
+      };
+    } else if (params.feedback === 'Không đồng ý') {
+      newStatus = 'Không đồng ý';
+      newAgreementEvidence = undefined;
+    } else if (params.feedback === 'Không liên hệ được') {
+      newStatus = 'Không liên hệ được';
+      newAgreementEvidence = undefined;
+    } else if (params.feedback === 'Chưa phản hồi') {
+      // BR-UC.QTC.02-03: Chưa phản hồi giữ nguyên trạng thái phiếu hiện có, chỉ lưu nhật ký theo dõi
+      newStatus = slip.status;
+    }
+
+    setSettlementSlips(prev => prev.map(s => {
+      if (s.id !== params.slipId) return s;
+      return {
+        ...s,
+        tenantFeedback: params.feedback,
+        disputeReason: params.disputeReason || s.disputeReason,
+        status: newStatus,
+        contactLogs: [newContactLog, ...(s.contactLogs || [])],
+        tenantAgreementEvidence: newAgreementEvidence,
+        auditHistory: [
+          ...(s.auditHistory || []),
+          {
+            timestamp: nowStr,
+            user: userName,
+            action: `Ghi nhận phản hồi khách: ${params.feedback} (UC-QTC-02)`,
+            schemeVersion: s.version,
+            note: `Kênh: ${params.contactLog.channel}. Kết quả: ${params.contactLog.result}. Trạng thái phiếu: ${newStatus}`
+          }
+        ],
+        updatedAt: nowStr
+      };
+    }));
+
+    logSecurity('SETTLEMENT_FEEDBACK_UPDATED', `Settlement ${params.slipId} feedback updated: ${params.feedback}. New status: ${newStatus}`);
+    return {
+      success: true,
+      message: `Đã ghi nhận phản hồi: ${params.feedback}. Trạng thái phiếu hiện tại: ${newStatus} (UC-QTC-02).`
+    };
+  };
+
+  const adjustSettlementDeductionsQTC02 = (params: {
+    slipId: string;
+    updatedDeductions: DeductionItem[];
+    adjustReason: string;
+  }) => {
+    const slip = settlementSlips.find(s => s.id === params.slipId);
+    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.', newVersion: 1 };
+
+    if (slip.status === 'Đã có 5.8 – chờ ký biên bản' || slip.status === 'Hoàn tất' || slip.status === 'Đã hủy') {
+      return { success: false, message: 'Phiếu đã có kết quả 5.8 hoặc đã khóa, không được sửa (BR-UC.QTC.02-05).', newVersion: slip.version };
+    }
+
+    if (!params.adjustReason.trim()) {
+      return { success: false, message: 'Bắt buộc nhập lý do điều chỉnh phương án khấu trừ (EF-02).', newVersion: slip.version };
+    }
+
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+    const newVersion = (slip.version || 1) + 1;
+
+    const totalDed = params.updatedDeductions.reduce((sum, d) => sum + d.amount, 0);
+    const newCalculated = slip.initialDepositAmount - totalDed;
+
+    setSettlementSlips(prev => prev.map(s => {
+      if (s.id !== params.slipId) return s;
+      return {
+        ...s,
+        version: newVersion,
+        deductions: params.updatedDeductions,
+        calculatedResult: newCalculated,
+        // BR-UC.QTC.02-12: Khi sửa tiền, bằng chứng đồng ý cũ bị hủy, phải xác nhận lại với khách
+        tenantAgreementEvidence: undefined,
+        status: 'Không đồng ý', // Chờ khách phản hồi phiên bản mới
+        tenantFeedback: 'Chưa phản hồi',
+        reviewRequired: false,
+        auditHistory: [
+          ...(s.auditHistory || []),
+          {
+            timestamp: nowStr,
+            user: userName,
+            action: `Điều chỉnh phương án khấu trừ -> Phiên bản v${newVersion} (UC-QTC-02 / Bước 4)`,
+            schemeVersion: newVersion,
+            note: `Lý do: ${params.adjustReason}. Tổng khấu trừ mới: ${totalDed.toLocaleString('vi-VN')} đ. Kết quả mới: ${newCalculated.toLocaleString('vi-VN')} đ. Bằng chứng đồng ý cũ đã hủy.`
+          }
+        ],
+        updatedAt: nowStr
+      };
+    }));
+
+    logSecurity('SETTLEMENT_ADJUSTED_QTC02', `Settlement ${params.slipId} adjusted to v${newVersion}. New result: ${newCalculated}`);
+    return {
+      success: true,
+      message: `Đã tính lại và nâng phương án lên phiên bản v${newVersion}! Kết quả mới: ${newCalculated.toLocaleString('vi-VN')} đ. Vui lòng liên hệ lại khách để xác nhận phiên bản này (BR-UC.QTC.02-12).`,
+      newVersion
+    };
+  };
+
+  const lockDisputeSettlementQTC02 = (params: {
+    slipId: string;
+    disputeReason: string;
+    disputeItems: string;
+    disputeBasis: string;
+  }) => {
+    const slip = settlementSlips.find(s => s.id === params.slipId);
+    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.' };
+
+    if (slip.status === 'Đã có 5.8 – chờ ký biên bản' || slip.status === 'Hoàn tất' || slip.status === 'Đã hủy') {
+      return { success: false, message: 'Phiếu đã khóa, không thể chuyển tranh chấp.' };
+    }
+
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+
+    setSettlementSlips(prev => prev.map(s => {
+      if (s.id !== params.slipId) return s;
+      return {
+        ...s,
+        status: 'Tranh chấp',
+        disputeReason: params.disputeReason,
+        disputeItems: params.disputeItems,
+        disputeBasis: params.disputeBasis,
+        disputeLocked: true,
+        auditHistory: [
+          ...(s.auditHistory || []),
+          {
+            timestamp: nowStr,
+            user: userName,
+            action: 'Xác lập tranh chấp và khóa sửa trực tiếp (AF-01)',
+            schemeVersion: s.version,
+            note: `Lý do: ${params.disputeReason}. Căn cứ: ${params.disputeBasis}`
+          }
+        ],
+        updatedAt: nowStr
+      };
+    }));
+
+    logSecurity('SETTLEMENT_DISPUTE_LOCKED', `Settlement ${params.slipId} locked in dispute. Reason: ${params.disputeReason}`);
+    return {
+      success: true,
+      message: `Đã chuyển phiếu sang trạng thái Tranh chấp (AF-01). Khóa sửa trực tiếp.`
+    };
+  };
+
+  const reopenDisputedSettlementQTC02 = (params: {
+    slipId: string;
+    reopenReason: string;
+  }) => {
+    const slip = settlementSlips.find(s => s.id === params.slipId);
+    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.' };
+
+    if (slip.status !== 'Tranh chấp') {
+      return { success: false, message: 'Chỉ phiếu đang ở trạng thái Tranh chấp mới được mở lại.' };
+    }
+
+    if (!params.reopenReason.trim()) {
+      return { success: false, message: 'Bắt buộc nhập lý do mở lại phiếu tranh chấp (AF-03).' };
+    }
+
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+
+    setSettlementSlips(prev => prev.map(s => {
+      if (s.id !== params.slipId) return s;
+      return {
+        ...s,
+        status: 'Không đồng ý', // BR-UC.QTC.02-03: Mở lại chuyển về Không đồng ý để tiếp tục điều chỉnh
+        disputeLocked: false,
+        auditHistory: [
+          ...(s.auditHistory || []),
+          {
+            timestamp: nowStr,
+            user: userName,
+            action: 'Mở lại phiếu Tranh chấp (AF-03)',
+            schemeVersion: s.version,
+            note: `Lý do mở lại: ${params.reopenReason}. Chuyển trạng thái về Không đồng ý để tiếp tục xử lý.`
+          }
+        ],
+        updatedAt: nowStr
+      };
+    }));
+
+    logSecurity('SETTLEMENT_DISPUTE_REOPENED', `Settlement ${params.slipId} reopened from dispute. Reason: ${params.reopenReason}`);
+    return {
+      success: true,
+      message: `Đã mở lại phiếu quyết toán cọc! Phiếu chuyển về trạng thái 'Không đồng ý' để điều chỉnh khoản trừ (AF-03).`
+    };
+  };
+
+  const cancelSettlementSlipQTC02 = (params: {
+    slipId: string;
+    cancelReason: string;
+  }) => {
+    const slip = settlementSlips.find(s => s.id === params.slipId);
+    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.' };
+
+    if (slip.step58Published || slip.transferReceipt) {
+      return { success: false, message: 'Phiếu đã có giao dịch tiền hoặc đã phát hành 5.8, không được hủy (BR-UC.QTC.02-07).' };
+    }
+
+    if (!params.cancelReason.trim()) {
+      return { success: false, message: 'Bắt buộc nhập lý do hủy phiếu quyết toán (AF-02).' };
+    }
+
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+
+    setSettlementSlips(prev => prev.map(s => {
+      if (s.id !== params.slipId) return s;
+      return {
+        ...s,
+        status: 'Đã hủy',
+        cancelReason: params.cancelReason,
+        cancelledAt: nowStr,
+        auditHistory: [
+          ...(s.auditHistory || []),
+          {
+            timestamp: nowStr,
+            user: userName,
+            action: 'Hủy phiếu quyết toán cọc (AF-02)',
+            schemeVersion: s.version,
+            note: `Lý do hủy: ${params.cancelReason}`
+          }
+        ],
+        updatedAt: nowStr
+      };
+    }));
+
+    logSecurity('SETTLEMENT_CANCELLED_QTC02', `Settlement ${params.slipId} cancelled. Reason: ${params.cancelReason}`);
+    return {
+      success: true,
+      message: `Đã hủy phiếu quyết toán cọc thành công (AF-02).`
+    };
+  };
+
+  const confirmSettlementTransferReceiptQTC03 = (params: {
+    slipId: string;
+    receipt?: DepositSettlementSlip['transferReceipt'];
+  }) => {
+    const slip = settlementSlips.find(s => s.id === params.slipId);
+    if (!slip) return { success: false, message: 'Không tìm thấy phiếu quyết toán.' };
+
+    // Bước 1: Kiểm tra trạng thái phiếu
+    if (slip.status !== 'Khách đồng ý') {
+      return {
+        success: false,
+        message: `Chỉ tiếp tục khi phiếu ở trạng thái 'Khách đồng ý'. Trạng thái hiện tại: '${slip.status}' (Bước 1).`
+      };
+    }
+
+    if (!slip.tenantAgreementEvidence || slip.tenantAgreementEvidence.schemeVersion !== slip.version) {
+      return {
+        success: false,
+        message: `Thiếu bằng chứng khách đồng ý hợp lệ cho phiên bản hiện hành v${slip.version} (BR-QTC03-01 / BR-UC.QTC.02-12).`
+      };
+    }
+
+    if (slip.reviewRequired) {
+      return {
+        success: false,
+        message: `Phiếu đang có cờ 'Cần rà soát' do bảng tính kỳ cuối hoặc công nợ nguồn đã thay đổi. Cần tính lại và khách đồng ý lại trước khi hoàn tất (BR-QTC01-08).`
+      };
+    }
+
+    if (slip.step58Published) {
+      return {
+        success: false,
+        message: 'Phiếu đã ghi kết quả 5.8 trước đó, không ghi nhận trùng lặp (AF-04).'
+      };
+    }
+
+    const nowStr = new Date().toISOString();
+    const userName = currentUser?.fullName || 'Nguyễn Văn An (Chủ nhà)';
+    const resultCode = 'KQ58-' + slip.roomCode.replace(/\D/g, '') + '-' + Date.now().toString().slice(-4);
+
+    // Bước 2: Kiểm tra tiền phải chuyển
+    const mustTransferAmount = Math.abs(slip.calculatedResult);
+
+    if (slip.calculatedResult !== 0) {
+      // Có tiền phải chuyển: Hoàn (>0) hoặc Thu thêm (<0)
+      if (!params.receipt) {
+        return {
+          success: false,
+          message: 'Bắt buộc nhập MỘT chứng từ chuyển khoản duy nhất cho khoản tiền phải chuyển (Bước 2 / BR-QTC03-08).'
+        };
+      }
+
+      // BR-QTC03-10: Chứng từ phải có số tiền bằng đúng số phải hoàn/thu thêm, không chuyển một phần
+      if (params.receipt.amount !== mustTransferAmount) {
+        return {
+          success: false,
+          message: `Số tiền chứng từ (${params.receipt.amount.toLocaleString('vi-VN')} đ) không khớp số tiền phải chuyển theo phương án thống nhất (${mustTransferAmount.toLocaleString('vi-VN')} đ). Không chấp nhận hoàn/thu một phần (BR-QTC03-10 / AF-01).`
+        };
+      }
+
+      if (!params.receipt.bankName || !params.receipt.accountNumber || !params.receipt.transactionCode) {
+        return {
+          success: false,
+          message: 'Vui lòng điền đầy đủ ngân hàng, số tài khoản nhận và mã giao dịch ngân hàng.'
+        };
+      }
+
+      // BR-QTC03-08: Với hoàn cọc, tài khoản nhận là tài khoản của KHÁCH được xác minh (không phải tài khoản chủ nhà 0988123456)
+      if (slip.calculatedResult > 0 && params.receipt.accountNumber === '0988123456') {
+        return {
+          success: false,
+          message: 'Với khoản hoàn cọc, tài khoản nhận phải là tài khoản ngân hàng của KHÁCH thuê được xác minh, không phải tài khoản MB Bank của Chủ nhà (BR-QTC03-08).'
+        };
+      }
+    }
+
+    // Bước 5 & 6: Xử lý trong một lần duy nhất (ATOMIC)
+    // 1. Cập nhật công nợ (paymentNotices)
+    setPaymentNotices(prev => prev.map(n => {
+      if (n.roomCode === slip.roomCode && n.leaseId === slip.leaseId) {
+        if (n.paymentStatus === 'Chưa thu') {
+          return {
+            ...n,
+            paymentStatus: slip.calculatedResult >= 0 ? 'Đã xử lý bằng cọc' : 'Đã thu',
+            // BR-QTC01-05: mã QR cũ không còn dùng để thu
+            status: 'Đã thanh toán' as any
+          };
+        }
+      }
+      return n;
+    }));
+
+    // 2. Cập nhật phiếu quyết toán: chuyển sang 'Đã có 5.8 – chờ ký biên bản'
+    setSettlementSlips(prev => prev.map(s => {
+      if (s.id !== params.slipId) return s;
+      return {
+        ...s,
+        status: 'Đã có 5.8 – chờ ký biên bản',
+        step58Published: true,
+        step58PublishedAt: nowStr,
+        step58ResultCode: resultCode,
+        transferReceipt: slip.calculatedResult === 0 ? undefined : {
+          ...params.receipt!,
+          verifiedBy: userName,
+          confirmedAt: nowStr
+        },
+        auditHistory: [
+          ...(s.auditHistory || []),
+          {
+            timestamp: nowStr,
+            user: userName,
+            action: 'Ghi nhận kết quả quyết toán cọc & phát hành 5.8 (UC-QTC-03)',
+            schemeVersion: s.version,
+            note: `Mã kết quả 5.8: ${resultCode}. Kết quả: ${slip.calculatedResult > 0 ? 'Hoàn cọc' : slip.calculatedResult < 0 ? 'Thu thêm' : 'Đối trừ hết'}. Chuyển trạng thái sang: Đã có 5.8 – chờ ký biên bản.`
+          }
+        ],
+        updatedAt: nowStr
+      };
+    }));
+
+    // 3. Đồng bộ kết quả 5.8 sang Biên bản trả phòng (BG10 / BG11)
+    const matchingReturnReport = handoverReturnReports.find(r => r.roomCode === slip.roomCode && r.leaseId === slip.leaseId);
+    if (matchingReturnReport) {
+      syncDepositSettlementBG10(matchingReturnReport.id, {
+        depositSettlementId: slip.id,
+        depositSettlementVersion: slip.version,
+        depositSettlementAmount: slip.initialDepositAmount,
+        depositRefundAmount: slip.calculatedResult > 0 ? slip.calculatedResult : 0,
+        depositDeductionAmount: slip.deductions.reduce((sum, d) => sum + d.amount, 0),
+        depositAdditionalDue: slip.calculatedResult < 0 ? Math.abs(slip.calculatedResult) : 0,
+        depositTrackingStatus: '5.8 hợp lệ – Đã thống nhất',
+        depositTrackingReason: `Đã có kết quả 5.8 hợp lệ (${resultCode}) thống nhất hoàn/thu ngày ${nowStr.split('T')[0]}`
+      });
+    }
+
+    // 4. Cập nhật báo cáo quản lý
+    setReportSnapshots(prev => prev.map(snap => ({
+      ...snap,
+      financialStats: {
+        ...snap.financialStats,
+        totalHandledByDeposit: snap.financialStats.totalHandledByDeposit + slip.deductions.reduce((sum, d) => sum + d.amount, 0)
+      }
+    })));
+
+    logSecurity('SETTLEMENT_RESULT_58_PUBLISHED', `Settlement ${params.slipId} 5.8 published (${resultCode}). Status: Đã có 5.8 – chờ ký biên bản.`);
+
+    return {
+      success: true,
+      message: `Ghi nhận kết quả quyết toán thành công! Phát hành kết quả 5.8 (${resultCode}), đồng bộ sang BG10/BG11 và chuyển trạng thái phiếu sang 'Đã có 5.8 – chờ ký biên bản' (UC-QTC-03).`
+    };
   };
 
   // ==================== BILLING (QT06) ====================
@@ -3855,6 +4316,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       settlementSlips,
       saveSettlementSlipQTC01,
       updateSettlementFeedbackQTC02,
+      adjustSettlementDeductionsQTC02,
+      lockDisputeSettlementQTC02,
+      reopenDisputedSettlementQTC02,
+      cancelSettlementSlipQTC02,
       confirmSettlementTransferReceiptQTC03,
 
       meterReadings,
